@@ -1,0 +1,10 @@
+[package]
+name = "digidoc"
+version = "0.0.0"
+edition = "2024"
+description = "A client library for BDOC/ASiC-E digital signatures (DigiDoc)"
+license = "MIT"
+repository = "https://github.com/wearekesk/digidoc-rs"
+readme = "README.md"
+
+[dependencies]
