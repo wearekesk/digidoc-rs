@@ -1,7 +1,7 @@
-use thiserror::Error;
 use quick_xml::de::DeError;
 use std::io;
 use std::string::FromUtf8Error;
+use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum SignatureError {

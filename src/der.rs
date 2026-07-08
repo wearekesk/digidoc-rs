@@ -45,10 +45,7 @@ pub(crate) fn encode_tlv(tag: u8, value: &[u8]) -> Vec<u8> {
 /// Read a single TLV from the start of `input`, expecting `tag`,
 /// and return the value bytes only (no tag, no length prefix).
 /// Errors if there are trailing bytes beyond the TLV.
-pub(crate) fn read_tlv<'a>(
-    input: &'a [u8],
-    tag: u8,
-) -> std::result::Result<&'a [u8], &'static str> {
+pub(crate) fn read_tlv(input: &[u8], tag: u8) -> std::result::Result<&[u8], &'static str> {
     let (value, rest) = read_tlv_with_remainder(input, tag)?;
     if !rest.is_empty() {
         return Err("trailing bytes after TLV");
@@ -58,10 +55,10 @@ pub(crate) fn read_tlv<'a>(
 
 /// Read a single TLV from the start of `input`, expecting `tag`,
 /// and return (value, remaining bytes after the TLV).
-pub(crate) fn read_tlv_with_remainder<'a>(
-    input: &'a [u8],
+pub(crate) fn read_tlv_with_remainder(
+    input: &[u8],
     tag: u8,
-) -> std::result::Result<(&'a [u8], &'a [u8]), &'static str> {
+) -> std::result::Result<(&[u8], &[u8]), &'static str> {
     if input.is_empty() {
         return Err("empty DER input");
     }

@@ -11,8 +11,9 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter, write::FileOptions};
 
 use crate::error::SignatureError;
 use crate::xmldsig::{
-    PublicKeyType, Signer as XmldsigSigner, verify_signature, XadesDataFile, XadesSignatureInputs,
-    XadesProductionPlace, build_xades_basic_signature, upgrade_xades_bes_to_t, upgrade_xades_t_to_lt,
+    PublicKeyType, Signer as XmldsigSigner, XadesDataFile, XadesProductionPlace,
+    XadesSignatureInputs, build_xades_basic_signature, upgrade_xades_bes_to_t,
+    upgrade_xades_t_to_lt, verify_signature,
 };
 
 // BDOC container format
@@ -310,28 +311,26 @@ impl DigiDocBuilder {
                 content: &f.content,
             })
             .collect();
-        let production_place =
-            input
-                .production_place
-                .as_ref()
-                .map(|p| XadesProductionPlace {
-                    city: p.city.as_deref(),
-                    state_or_province: p.state_or_province.as_deref(),
-                    postal_code: p.postal_code.as_deref(),
-                    country_name: p.country_name.as_deref(),
-                });
+        let production_place = input
+            .production_place
+            .as_ref()
+            .map(|p| XadesProductionPlace {
+                city: p.city.as_deref(),
+                state_or_province: p.state_or_province.as_deref(),
+                postal_code: p.postal_code.as_deref(),
+                country_name: p.country_name.as_deref(),
+            });
         let claimed_roles: Vec<&str> = input.claimed_roles.iter().map(String::as_str).collect();
-        let bes =
-            build_xades_basic_signature(&XadesSignatureInputs {
-                signer: &*input.signer,
-                certificate_der: &input.certificate_der,
-                signing_time: input.signing_time,
-                data_files: &data_files,
-                index,
-                production_place,
-                claimed_roles: &claimed_roles,
-            })
-            .map_err(|e: SignatureError| anyhow!("xades signature build: {}", e))?;
+        let bes = build_xades_basic_signature(&XadesSignatureInputs {
+            signer: &*input.signer,
+            certificate_der: &input.certificate_der,
+            signing_time: input.signing_time,
+            data_files: &data_files,
+            index,
+            production_place,
+            claimed_roles: &claimed_roles,
+        })
+        .map_err(|e: SignatureError| anyhow!("xades signature build: {}", e))?;
 
         let tsa_url = match &input.tsa_url {
             None => return Ok(bes.xml),
@@ -339,10 +338,9 @@ impl DigiDocBuilder {
         };
 
         // BES → T (timestamp the SignatureValue)
-        let token =
-            crate::tsa::fetch_timestamp_token(tsa_url, &bes.signature_value_canonical)
-                .await
-                .map_err(|e: SignatureError| anyhow!("TSA timestamp fetch: {}", e))?;
+        let token = crate::tsa::fetch_timestamp_token(tsa_url, &bes.signature_value_canonical)
+            .await
+            .map_err(|e: SignatureError| anyhow!("TSA timestamp fetch: {}", e))?;
         let t_xml = upgrade_xades_bes_to_t(&bes, &token)
             .map_err(|e: SignatureError| anyhow!("xades-T upgrade: {}", e))?;
 
@@ -356,20 +354,12 @@ impl DigiDocBuilder {
             .issuer_cert_der
             .as_deref()
             .unwrap_or(&input.certificate_der);
-        let ocsp_response = crate::ocsp::fetch_ocsp_response(
-            ocsp_url,
-            &input.certificate_der,
-            issuer_cert,
-        )
-        .await
-        .map_err(|e: SignatureError| anyhow!("OCSP fetch: {}", e))?;
-        upgrade_xades_t_to_lt(
-            &t_xml,
-            &bes.signature_id,
-            issuer_cert,
-            &ocsp_response,
-        )
-        .map_err(|e: SignatureError| anyhow!("xades-LT upgrade: {}", e))
+        let ocsp_response =
+            crate::ocsp::fetch_ocsp_response(ocsp_url, &input.certificate_der, issuer_cert)
+                .await
+                .map_err(|e: SignatureError| anyhow!("OCSP fetch: {}", e))?;
+        upgrade_xades_t_to_lt(&t_xml, &bes.signature_id, issuer_cert, &ocsp_response)
+            .map_err(|e: SignatureError| anyhow!("xades-LT upgrade: {}", e))
     }
 
     fn create_manifest(&self) -> Result<String, anyhow::Error> {
@@ -577,17 +567,26 @@ impl<'a> DigiDocReader<'a> {
                 PublicKeyType::Rsa(rsa_key)
             }
             "1.2.840.10045.2.1" => {
-                let parameters = cert.public_key().algorithm.parameters.as_ref()
+                let parameters = cert
+                    .public_key()
+                    .algorithm
+                    .parameters
+                    .as_ref()
                     .ok_or_else(|| anyhow!("ECDSA missing parameters"))?;
-                let oid = parameters.as_oid()
+                let oid = parameters
+                    .as_oid()
                     .map_err(|e| anyhow!("Failed to parse ECDSA curve OID: {}", e))?;
                 match oid.to_string().as_str() {
                     "1.2.840.10045.3.1.7" => {
-                        let key = p256::ecdsa::VerifyingKey::from_sec1_bytes(&cert.public_key().subject_public_key.data)?;
+                        let key = p256::ecdsa::VerifyingKey::from_sec1_bytes(
+                            &cert.public_key().subject_public_key.data,
+                        )?;
                         PublicKeyType::P256(key)
                     }
                     "1.3.132.0.10" => {
-                        let key = k256::ecdsa::VerifyingKey::from_sec1_bytes(&cert.public_key().subject_public_key.data)?;
+                        let key = k256::ecdsa::VerifyingKey::from_sec1_bytes(
+                            &cert.public_key().subject_public_key.data,
+                        )?;
                         PublicKeyType::K256(key)
                     }
                     alg => return Err(anyhow!("Unsupported ECDSA curve: {}", alg)),
@@ -602,9 +601,7 @@ impl<'a> DigiDocReader<'a> {
                     return Ok(file.content.clone());
                 }
             }
-            Err(SignatureError::ReferenceNotFound(
-                uri.to_string(),
-            ))
+            Err(SignatureError::ReferenceNotFound(uri.to_string()))
         };
 
         match verify_signature(
@@ -672,7 +669,7 @@ fn parse_signature(signature_content: String) -> Result<DigiDocSignatureInfo, an
             .reference
             .first()
             .map(|r| r.digest_method.algorithm.clone())
-            .unwrap_or_default(),
+            .unwrap_or_else(|| "unknown".to_string()),
         is_valid: false,
     })
 }
@@ -680,10 +677,10 @@ fn parse_signature(signature_content: String) -> Result<DigiDocSignatureInfo, an
 fn extract_common_name(cert: &X509Certificate) -> Result<String, anyhow::Error> {
     for rdn in cert.subject().iter() {
         for attr_tv in rdn.iter() {
-            if attr_tv.attr_type().to_string() == "2.5.4.3" {
-                if let Ok(cn_str) = attr_tv.attr_value().as_str() {
-                    return Ok(cn_str.to_string());
-                }
+            if attr_tv.attr_type().to_string() == "2.5.4.3"
+                && let Ok(cn_str) = attr_tv.attr_value().as_str()
+            {
+                return Ok(cn_str.to_string());
             }
         }
     }

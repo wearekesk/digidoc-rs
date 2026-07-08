@@ -2,9 +2,7 @@ use base64::{Engine as _, engine::general_purpose};
 use quick_xml::se::to_string;
 use rsa::{
     RsaPrivateKey, RsaPublicKey,
-    pkcs1v15::{
-        Signature as RsaSignature, SigningKey as RsaSigningKey,
-    },
+    pkcs1v15::{Signature as RsaSignature, SigningKey as RsaSigningKey},
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -276,21 +274,6 @@ struct XadesDataObjectFormat<'a> {
 }
 
 #[derive(Serialize, Debug)]
-#[serde(rename = "ds:SignatureValue")]
-struct CanonicalSignatureValue<'a> {
-    #[serde(rename = "@xmlns:asic")]
-    xmlns_asic: &'a str,
-    #[serde(rename = "@xmlns:ds")]
-    xmlns_ds: &'a str,
-    #[serde(rename = "@xmlns:xades")]
-    xmlns_xades: &'a str,
-    #[serde(rename = "@Id")]
-    id: &'a str,
-    #[serde(rename = "$text")]
-    value: &'a str,
-}
-
-#[derive(Serialize, Debug)]
 #[serde(rename = "xades:UnsignedProperties")]
 struct XadesUnsignedProperties {
     #[serde(rename = "xades:UnsignedSignatureProperties")]
@@ -463,15 +446,18 @@ where
     let doc = roxmltree::Document::parse(xml_str)
         .map_err(|e| SignatureError::XmlStructureError(e.to_string()))?;
 
-    let signature_node = doc.descendants()
+    let signature_node = doc
+        .descendants()
         .find(|n| n.is_element() && n.tag_name().name() == "Signature")
         .ok_or_else(|| SignatureError::MissingElement("Signature".to_string()))?;
 
-    let signed_info_node = signature_node.children()
+    let signed_info_node = signature_node
+        .children()
         .find(|n| n.is_element() && n.tag_name().name() == "SignedInfo")
         .ok_or_else(|| SignatureError::MissingElement("SignedInfo".to_string()))?;
 
-    let signature_value_node = signature_node.children()
+    let signature_value_node = signature_node
+        .children()
         .find(|n| n.is_element() && n.tag_name().name() == "SignatureValue")
         .ok_or_else(|| SignatureError::MissingElement("SignatureValue".to_string()))?;
 
@@ -482,14 +468,21 @@ where
     let resolver_ref = external_data_resolver.as_ref();
 
     for reference in &signed_info.references {
-        let uri = reference.uri.as_deref()
+        let uri = reference
+            .uri
+            .as_deref()
             .ok_or_else(|| SignatureError::MissingElement("Reference URI".to_string()))?;
 
         let referenced_data_bytes = if uri.starts_with('#') {
-            let resolved = resolver.dereference(uri)
-                .map_err(|e| SignatureError::ReferenceNotFound(format!("ID lookup failed for {}: {}", uri, e)))?;
-            xml_sec::xmldsig::transforms::execute_transforms(signature_node, resolved, &reference.transforms)
-                .map_err(|e| SignatureError::CanonicalizationError(e.to_string()))?
+            let resolved = resolver.dereference(uri).map_err(|e| {
+                SignatureError::ReferenceNotFound(format!("ID lookup failed for {}: {}", uri, e))
+            })?;
+            xml_sec::xmldsig::transforms::execute_transforms(
+                signature_node,
+                resolved,
+                &reference.transforms,
+            )
+            .map_err(|e| SignatureError::CanonicalizationError(e.to_string()))?
         } else if let Some(resolver_fn) = resolver_ref {
             resolver_fn(uri)?
         } else {
@@ -499,8 +492,12 @@ where
             )));
         };
 
-        let calculated_digest = xml_sec::xmldsig::digest::compute_digest(reference.digest_method, &referenced_data_bytes);
-        if !xml_sec::xmldsig::digest::constant_time_eq(&calculated_digest, &reference.digest_value) {
+        let calculated_digest = xml_sec::xmldsig::digest::compute_digest(
+            reference.digest_method,
+            &referenced_data_bytes,
+        );
+        if !xml_sec::xmldsig::digest::constant_time_eq(&calculated_digest, &reference.digest_value)
+        {
             return Err(SignatureError::DigestMismatch(uri.to_string()));
         }
     }
@@ -511,57 +508,80 @@ where
         .collect();
     let mut canonical_signed_info = Vec::new();
     let c14n_algo = xml_sec::c14n::C14nAlgorithm::from_uri(signed_info.c14n_method.uri())
-        .ok_or_else(|| SignatureError::UnsupportedError(format!("Unsupported C14N URI: {}", signed_info.c14n_method.uri())))?;
+        .ok_or_else(|| {
+            SignatureError::UnsupportedError(format!(
+                "Unsupported C14N URI: {}",
+                signed_info.c14n_method.uri()
+            ))
+        })?;
     xml_sec::c14n::canonicalize(
         &doc,
         Some(&|node| signed_info_subtree.contains(&node.id())),
         &c14n_algo,
         &mut canonical_signed_info,
-    ).map_err(|e| SignatureError::CanonicalizationError(e.to_string()))?;
+    )
+    .map_err(|e| SignatureError::CanonicalizationError(e.to_string()))?;
 
-    let signature_value_text = signature_value_node.text().unwrap_or_default().trim();
-    let signature_value_clean: String = signature_value_text.chars().filter(|c| !c.is_whitespace()).collect();
-    let signature_value_bytes = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &signature_value_clean)?;
+    let signature_value_text = signature_value_node
+        .text()
+        .ok_or_else(|| SignatureError::MissingElement("SignatureValue text content".to_string()))?
+        .trim();
+    let signature_value_clean: String = signature_value_text
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect();
+    let signature_value_bytes = base64::Engine::decode(
+        &base64::engine::general_purpose::STANDARD,
+        &signature_value_clean,
+    )?;
 
     let spki_der = match public_key {
         PublicKeyType::Rsa(vk) => {
             use rsa::pkcs8::{EncodePublicKey, der::Encode};
-            vk.to_public_key_der().map_err(|e| SignatureError::KeyParsingError(e.to_string()))?.to_der()
+            vk.to_public_key_der()
+                .map_err(|e| SignatureError::KeyParsingError(e.to_string()))?
+                .to_der()
                 .map_err(|e| SignatureError::KeyParsingError(e.to_string()))?
         }
         PublicKeyType::P256(vk) => {
             use p256::pkcs8::{EncodePublicKey, der::Encode};
-            vk.to_public_key_der().map_err(|e| SignatureError::KeyParsingError(e.to_string()))?.to_der()
+            vk.to_public_key_der()
+                .map_err(|e| SignatureError::KeyParsingError(e.to_string()))?
+                .to_der()
                 .map_err(|e| SignatureError::KeyParsingError(e.to_string()))?
         }
         PublicKeyType::K256(vk) => {
             use k256::pkcs8::{EncodePublicKey, der::Encode};
-            vk.to_public_key_der().map_err(|e| SignatureError::KeyParsingError(e.to_string()))?.to_der()
+            vk.to_public_key_der()
+                .map_err(|e| SignatureError::KeyParsingError(e.to_string()))?
+                .to_der()
                 .map_err(|e| SignatureError::KeyParsingError(e.to_string()))?
         }
     };
 
     let sig_valid = match public_key {
-        PublicKeyType::Rsa(_) => {
-            xml_sec::xmldsig::signature::verify_rsa_signature_spki(
-                signed_info.signature_method,
-                &spki_der,
-                &canonical_signed_info,
-                &signature_value_bytes,
-            ).map_err(|e| SignatureError::CryptoVerificationError(e.to_string()))?
-        }
+        PublicKeyType::Rsa(_) => xml_sec::xmldsig::signature::verify_rsa_signature_spki(
+            signed_info.signature_method,
+            &spki_der,
+            &canonical_signed_info,
+            &signature_value_bytes,
+        )
+        .map_err(|e| SignatureError::CryptoVerificationError(e.to_string()))?,
         PublicKeyType::P256(_) | PublicKeyType::K256(_) => {
             xml_sec::xmldsig::signature::verify_ecdsa_signature_spki(
                 signed_info.signature_method,
                 &spki_der,
                 &canonical_signed_info,
                 &signature_value_bytes,
-            ).map_err(|e| SignatureError::CryptoVerificationError(e.to_string()))?
+            )
+            .map_err(|e| SignatureError::CryptoVerificationError(e.to_string()))?
         }
     };
 
     if !sig_valid {
-        return Err(SignatureError::CryptoVerificationError("Signature mismatch".to_string()));
+        return Err(SignatureError::CryptoVerificationError(
+            "Signature mismatch".to_string(),
+        ));
     }
 
     Ok(())
@@ -656,8 +676,9 @@ pub fn build_xades_basic_signature(input: &XadesSignatureInputs<'_>) -> Result<X
     let signed_properties_xml_raw = to_string(&signed_properties)
         .map_err(|e| SignatureError::XmlSerializationError(e.to_string()))?;
     let algo = xml_sec::c14n::C14nAlgorithm::new(xml_sec::c14n::C14nMode::Inclusive1_0, false);
-    let signed_properties_canonical = xml_sec::c14n::canonicalize_xml(signed_properties_xml_raw.as_bytes(), &algo)
-        .map_err(|e| SignatureError::CanonicalizationError(e.to_string()))?;
+    let signed_properties_canonical =
+        xml_sec::c14n::canonicalize_xml(signed_properties_xml_raw.as_bytes(), &algo)
+            .map_err(|e| SignatureError::CanonicalizationError(e.to_string()))?;
     let signed_properties_digest = Sha256::digest(&signed_properties_canonical);
     let signed_properties_digest_b64 = general_purpose::STANDARD.encode(signed_properties_digest);
 
@@ -687,8 +708,9 @@ pub fn build_xades_basic_signature(input: &XadesSignatureInputs<'_>) -> Result<X
 
     let signed_info_xml_raw = to_string(&signed_info)
         .map_err(|e| SignatureError::XmlSerializationError(e.to_string()))?;
-    let signed_info_canonical = xml_sec::c14n::canonicalize_xml(signed_info_xml_raw.as_bytes(), &algo)
-        .map_err(|e| SignatureError::CanonicalizationError(e.to_string()))?;
+    let signed_info_canonical =
+        xml_sec::c14n::canonicalize_xml(signed_info_xml_raw.as_bytes(), &algo)
+            .map_err(|e| SignatureError::CanonicalizationError(e.to_string()))?;
     let signature_value_bytes = input.signer.sign(&signed_info_canonical)?;
     let signature_value_b64 = general_purpose::STANDARD.encode(signature_value_bytes);
 
@@ -716,11 +738,12 @@ pub fn build_xades_basic_signature(input: &XadesSignatureInputs<'_>) -> Result<X
             },
         },
     };
-    let body = to_string(&envelope)
-        .map_err(|e| SignatureError::XmlSerializationError(e.to_string()))?;
+    let body =
+        to_string(&envelope).map_err(|e| SignatureError::XmlSerializationError(e.to_string()))?;
     let xml = format!("<?xml version=\"1.0\" encoding=\"UTF-8\"?>{}", body);
 
-    let signature_value_canonical = build_canonical_signature_value(&signature_value_id, &signature_value_b64)?;
+    let signature_value_canonical =
+        build_canonical_signature_value(&signature_value_id, &signature_value_b64)?;
 
     Ok(XadesBesResult {
         xml,
@@ -741,8 +764,8 @@ pub fn upgrade_xades_bes_to_t(bes: &XadesBesResult, timestamp_token_der: &[u8]) 
             },
         },
     };
-    let unsigned_block = to_string(&unsigned)
-        .map_err(|e| SignatureError::XmlSerializationError(e.to_string()))?;
+    let unsigned_block =
+        to_string(&unsigned).map_err(|e| SignatureError::XmlSerializationError(e.to_string()))?;
     let close_tag = "</xades:QualifyingProperties>";
     let pos = bes.xml.rfind(close_tag).ok_or_else(|| {
         SignatureError::XmlStructureError("BES XML missing </xades:QualifyingProperties>".into())
