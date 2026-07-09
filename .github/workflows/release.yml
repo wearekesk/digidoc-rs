@@ -1,23 +1,16 @@
 name: Release
 
-# On-demand publishing to crates.io. Bump the crate version(s) in Cargo.toml
-# first, then run this workflow from the Actions tab. Defaults to a dry run so
-# you can validate packaging before actually uploading.
+# On-demand publishing of the `digidoc` crate to crates.io. Bump the version in
+# Cargo.toml first, then run this workflow from the Actions tab. Defaults to a
+# dry run so you can validate packaging before actually uploading.
 #
 # Authentication uses crates.io Trusted Publishing (OIDC): a short-lived token
 # is minted per run, so there is no long-lived CARGO_REGISTRY_TOKEN secret to
 # store or leak. Before the first real publish, configure a Trusted Publisher
-# for each crate on crates.io (Owner: this repo, Workflow: release.yml).
+# for the crate on crates.io (Owner: this repo, Workflow: release.yml).
 on:
   workflow_dispatch:
     inputs:
-      crate:
-        description: "Crate to publish"
-        required: true
-        default: digidoc
-        type: choice
-        options:
-          - digidoc
       dry_run:
         description: "Dry run (package + verify only, no upload)"
         required: true
@@ -35,11 +28,11 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # Dry run: packages and verifies the selected crate(s) without uploading. This
-  # job deliberately holds NO id-token permission — it never authenticates to
+  # Dry run: packages and verifies the crate without uploading. This job
+  # deliberately holds NO id-token permission — it never authenticates to
   # crates.io, so an OIDC token must not be mintable on this path.
   dry-run:
-    name: dry-run (${{ inputs.crate }})
+    name: dry-run
     # Only ever run from the repository's default branch, so a manual dispatch
     # from an arbitrary branch cannot reach crates.io. Uses the default-branch
     # context so it keeps working if the branch is renamed.
@@ -59,15 +52,15 @@ jobs:
       - name: Dry-run publish to crates.io
         run: |
           set -euo pipefail
-          echo "::group::cargo publish -p digidoc --dry-run"
-          cargo publish -p "digidoc" --dry-run
+          echo "::group::cargo publish --dry-run"
+          cargo publish --dry-run
           echo "::endgroup::"
 
-  # Real publish: uploads the selected crate(s) to crates.io. Only this job holds
-  # id-token: write, so the short-lived OIDC token can only be minted on the real
-  # publish path.
+  # Real publish: uploads the crate to crates.io. Only this job holds
+  # id-token: write, so the short-lived OIDC token can only be minted on the
+  # real publish path.
   publish:
-    name: publish (${{ inputs.crate }})
+    name: publish
     if: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && !inputs.dry_run }}
     runs-on: ubuntu-latest
     permissions:
@@ -91,6 +84,6 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
         run: |
           set -euo pipefail
-          echo "::group::cargo publish -p digidoc"
-          cargo publish -p "digidoc"
+          echo "::group::cargo publish"
+          cargo publish
           echo "::endgroup::"
