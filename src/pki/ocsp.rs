@@ -21,7 +21,7 @@
 use sha1::{Digest as Sha1Digest, Sha1};
 use x509_parser::prelude::*;
 
-use crate::der::{decode_unsigned_int, encode_tlv, read_tlv, read_tlv_with_remainder};
+use super::der::{decode_unsigned_int, encode_tlv, read_tlv, read_tlv_with_remainder};
 use crate::error::{Result, SignatureError};
 
 /// OID for `id-sha1` (1.3.14.3.2.26) — the hash algorithm used
@@ -231,7 +231,7 @@ fn extract_basic_ocsp_response(response_der: &[u8]) -> Result<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::der::encode_tlv;
+    use crate::pki::der::encode_tlv;
 
     #[test]
     fn extract_basic_response_rejects_failure_status() {

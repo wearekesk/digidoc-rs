@@ -21,7 +21,7 @@
 
 use sha2::{Digest, Sha256};
 
-use crate::der::{decode_unsigned_int, encode_tlv, read_tlv_with_remainder, total_tlv_length};
+use super::der::{decode_unsigned_int, encode_tlv, read_tlv_with_remainder, total_tlv_length};
 use crate::error::{Result, SignatureError};
 
 /// Default Estonian RIA TSA — the same endpoint DigiDoc4 itself
@@ -184,7 +184,7 @@ fn extract_timestamp_token(response_der: &[u8]) -> Result<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::der::{encode_tlv, read_tlv};
+    use crate::pki::der::{encode_tlv, read_tlv};
 
     #[test]
     fn timestamp_request_is_well_formed_der() {

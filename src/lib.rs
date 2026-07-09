@@ -1,8 +1,6 @@
-pub mod der;
 pub mod digidoc;
 pub mod error;
-pub mod ocsp;
-pub mod tsa;
+pub mod pki;
 pub mod xmldsig;
 
 #[cfg(test)]
@@ -16,4 +14,5 @@ pub use crate::digidoc::{
 pub use crate::error::{Result, SignatureError};
 pub use crate::xmldsig::{
     PublicKeyType, Signer, SigningKeyType, build_xades_basic_signature, verify_signature,
+    sign_enveloping, load_rsa_private_key,
 };
