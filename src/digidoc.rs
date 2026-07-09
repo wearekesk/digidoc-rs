@@ -451,19 +451,17 @@ impl<'a> DigiDocReader<'a> {
             Err(e) => validation_errors.push(format!("Missing mimetype file: {}", e)),
         }
 
-        // Parse manifest
-        let mut manifest_content = String::new();
-        match zip.by_name("META-INF/manifest.xml") {
-            Ok(mut zf) => {
-                zf.read_to_string(&mut manifest_content)?;
-            }
-            Err(e) => validation_errors.push(format!("Missing manifest.xml: {}", e)),
-        }
+        let manifest_content = {
+            let mut content = String::new();
+            let mut zf = zip
+                .by_name("META-INF/manifest.xml")
+                .map_err(|e| anyhow!("Missing manifest.xml: {}", e))?;
+            zf.read_to_string(&mut content)?;
+            content
+        };
 
-        let manifest: DigiDocManifest = xml_serde::from_str(&manifest_content).map_err(|e| {
-            validation_errors.push(format!("Error parsing manifest: {}", e));
-            anyhow!("Error parsing manifest: {}", e)
-        })?;
+        let manifest: DigiDocManifest = xml_serde::from_str(&manifest_content)
+            .map_err(|e| anyhow!("Error parsing manifest: {}", e))?;
 
         debug!("{:?}", manifest);
 
@@ -518,17 +516,19 @@ impl<'a> DigiDocReader<'a> {
                         }
                     }
 
-                    // Check certificate validity
-                    let now = chrono::Utc::now();
-                    if now < sig_info.signer_info.not_before {
+                    // Check certificate validity against signing time
+                    // (not the current time) — archived documents
+                    // remain valid even after the signing cert expires.
+                    let signing_time = sig_info.signing_time;
+                    if signing_time < sig_info.signer_info.not_before {
                         validation_errors.push(format!(
-                            "Certificate not yet valid for {}",
+                            "Certificate not yet valid at signing time for {}",
                             sig_info.signer_info.common_name
                         ));
                     }
-                    if now > sig_info.signer_info.not_after {
+                    if signing_time > sig_info.signer_info.not_after {
                         validation_errors.push(format!(
-                            "Certificate expired for {}",
+                            "Certificate expired at signing time for {}",
                             sig_info.signer_info.common_name
                         ));
                     }
@@ -618,11 +618,70 @@ impl<'a> DigiDocReader<'a> {
     }
 }
 
+/// Strip well-known namespace prefixes (`ds:`, `asic:`, `xades:`) from
+/// XML **element and attribute names only**, leaving text content and
+/// attribute values untouched.
+///
+/// The approach: scan byte-by-byte; when inside a `<…>` region we
+/// replace occurrences of the prefix. Outside of tags the bytes are
+/// copied verbatim — this prevents corrupting URIs or element text that
+/// happen to contain the substring.
+fn strip_tag_prefixes(xml: &str) -> String {
+    const PREFIXES: &[&str] = &["ds:", "asic:", "xades:"];
+    let mut out = String::with_capacity(xml.len());
+    let mut inside_tag = false;
+    let bytes = xml.as_bytes();
+    let len = bytes.len();
+    let mut i = 0;
+
+    while i < len {
+        let ch = bytes[i];
+
+        if ch == b'<' {
+            inside_tag = true;
+            out.push('<');
+            i += 1;
+            continue;
+        }
+        if ch == b'>' {
+            inside_tag = false;
+            out.push('>');
+            i += 1;
+            continue;
+        }
+
+        if inside_tag {
+            let mut matched = false;
+            for prefix in PREFIXES {
+                let pb = prefix.as_bytes();
+                if i + pb.len() <= len && &bytes[i..i + pb.len()] == pb {
+                    i += pb.len();
+                    matched = true;
+                    break;
+                }
+            }
+            if !matched {
+                out.push(ch as char);
+                i += 1;
+            }
+        } else {
+            out.push(ch as char);
+            i += 1;
+        }
+    }
+    out
+}
+
 fn parse_signature(signature_content: String) -> Result<DigiDocSignatureInfo, anyhow::Error> {
-    let signature_xml = signature_content
-        .replace("ds:", "")
-        .replace("asic:", "")
-        .replace("xades:", "");
+    // Strip well-known namespace prefixes from XML tags and attributes
+    // only — a naive global `.replace("ds:", "")` would corrupt URIs,
+    // element text, or attribute values that happen to contain the
+    // substring.  We target only tag-position occurrences:
+    //   opening tags:  <ds:Foo  →  <Foo
+    //   closing tags:  </ds:Foo →  </Foo
+    //   attributes:    xmlns:ds →  xmlns:ds  (left alone — quick_xml
+    //                  handles the duplicate `xmlns` attrs gracefully)
+    let signature_xml = strip_tag_prefixes(&signature_content);
     debug!("Signature XML: {}", signature_xml);
     let signature: XAdEsSignatures = quick_xml::de::from_str(&signature_xml)?;
 

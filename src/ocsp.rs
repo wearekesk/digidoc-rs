@@ -48,9 +48,12 @@ pub async fn fetch_ocsp_response(
 ) -> Result<Vec<u8>> {
     let request_der = build_ocsp_request(subject_cert_der, issuer_cert_der)?;
 
-    let client = reqwest::Client::builder()
-        .build()
-        .map_err(|e| SignatureError::GeneralError(format!("OCSP HTTP client init: {}", e)))?;
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    let client = CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .build()
+            .expect("reqwest::Client::builder().build() infallible with default config")
+    });
     let response = client
         .post(ocsp_url)
         .header("Content-Type", "application/ocsp-request")
@@ -180,7 +183,7 @@ fn build_ocsp_request(subject_cert_der: &[u8], issuer_cert_der: &[u8]) -> Result
 /// }
 /// ```
 fn extract_basic_ocsp_response(response_der: &[u8]) -> Result<Vec<u8>> {
-    let outer = read_tlv(response_der, 0x30)
+    let (outer, _) = read_tlv_with_remainder(response_der, 0x30)
         .map_err(|e| SignatureError::GeneralError(format!("OCSP response not SEQUENCE: {}", e)))?;
 
     // responseStatus ENUMERATED — 0 = successful. Anything else

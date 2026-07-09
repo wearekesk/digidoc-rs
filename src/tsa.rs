@@ -21,9 +21,7 @@
 
 use sha2::{Digest, Sha256};
 
-use crate::der::{
-    decode_unsigned_int, encode_tlv, read_tlv, read_tlv_with_remainder, total_tlv_length,
-};
+use crate::der::{decode_unsigned_int, encode_tlv, read_tlv_with_remainder, total_tlv_length};
 use crate::error::{Result, SignatureError};
 
 /// Default Estonian RIA TSA — the same endpoint DigiDoc4 itself
@@ -52,9 +50,12 @@ pub async fn fetch_timestamp_token(
     let imprint = Sha256::digest(canonical_signature_value);
     let request_der = build_timestamp_request(&imprint);
 
-    let client = reqwest::Client::builder()
-        .build()
-        .map_err(|e| SignatureError::GeneralError(format!("TSA HTTP client init: {}", e)))?;
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    let client = CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .build()
+            .expect("reqwest::Client::builder().build() infallible with default config")
+    });
     let response = client
         .post(tsa_url)
         .header("Content-Type", "application/timestamp-query")
@@ -143,7 +144,7 @@ fn build_timestamp_request(imprint_sha256: &[u8]) -> Vec<u8> {
 ///     failInfo      PKIFailureInfo  OPTIONAL  }
 /// ```
 fn extract_timestamp_token(response_der: &[u8]) -> Result<Vec<u8>> {
-    let outer_value = read_tlv(response_der, 0x30)
+    let (outer_value, _) = read_tlv_with_remainder(response_der, 0x30)
         .map_err(|e| SignatureError::GeneralError(format!("TSA response not SEQUENCE: {}", e)))?;
     let (status_info, rest) = read_tlv_with_remainder(outer_value, 0x30)
         .map_err(|e| SignatureError::GeneralError(format!("TSA PKIStatusInfo: {}", e)))?;
@@ -182,7 +183,7 @@ fn extract_timestamp_token(response_der: &[u8]) -> Result<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::der::encode_tlv;
+    use crate::der::{encode_tlv, read_tlv};
 
     #[test]
     fn timestamp_request_is_well_formed_der() {
