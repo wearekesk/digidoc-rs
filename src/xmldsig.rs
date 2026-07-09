@@ -369,6 +369,7 @@ pub trait Signer {
     fn verifying_key(&self) -> Result<PublicKeyType>;
 }
 
+#[derive(Clone)]
 pub enum SigningKeyType {
     Rsa(Box<RsaPrivateKey>),
     P256(P256SigningKey),

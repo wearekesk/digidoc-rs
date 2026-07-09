@@ -10,7 +10,7 @@ pub(crate) mod test_keys;
 
 // Re-export major builder and reader types at root level
 pub use crate::digidoc::{
-    DigiDocBuilder, DigiDocFile, DigiDocProductionPlace, DigiDocReader, DigiDocSignature,
+    DigiDocBuilder, DigiDocFile, DigiDocProductionPlace, DigiDocReader,
     DigiDocSignatureInfo, DigiDocSignerInfo, DigiDocSignerInput, DigiDocValidationResult,
 };
 pub use crate::error::{Result, SignatureError};

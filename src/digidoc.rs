@@ -49,16 +49,7 @@ pub struct DigiDocFile {
 /// `<ds:DigestValue>` elements, which is why containers built
 /// through `add_signature` were never accepted by any real XAdES
 /// verifier (e.g. Estonian DigiDoc4).
-#[derive(Debug, Clone)]
-#[deprecated(
-    note = "produces signatures that do not verify; use `DigiDocBuilder::add_signer` instead"
-)]
-pub struct DigiDocSignature {
-    pub certificate: Vec<u8>,
-    pub signature_value: Vec<u8>,
-    pub signed_info: String,
-    pub signing_time: DateTime<Utc>,
-}
+
 
 /// Inputs for building a signature in `add_signer` mode — the
 /// builder owns the canonical-XML / digest-computation flow and
@@ -180,10 +171,6 @@ struct ManifestFileEntry<'a> {
 
 pub struct DigiDocBuilder {
     files: Vec<DigiDocFile>,
-    /// Pre-computed signatures (deprecated entry point — kept for
-    /// API compatibility, but `create_container` flags any present
-    /// here as malformed).
-    signatures: Vec<DigiDocSignature>,
     /// Active signing inputs — the builder runs the full XAdES
     /// dance (file digests, cert digest, SignedProperties digest,
     /// SignedInfo canonicalisation, then signer.sign()) for each
@@ -195,7 +182,6 @@ impl DigiDocBuilder {
     pub fn new() -> Self {
         Self {
             files: Vec::new(),
-            signatures: Vec::new(),
             signers: Vec::new(),
         }
     }
@@ -241,28 +227,12 @@ impl DigiDocBuilder {
         self
     }
 
-    #[deprecated(
-        note = "produces signatures that do not verify; use `DigiDocBuilder::add_signer` instead"
-    )]
-    #[allow(deprecated)]
-    pub fn add_signature(mut self, signature: DigiDocSignature) -> Self {
-        self.signatures.push(signature);
-        self
-    }
 
-    #[allow(deprecated)]
+
     pub async fn create_container<P: AsRef<Path>>(
         &self,
         output_path: P,
     ) -> Result<(), anyhow::Error> {
-        if !self.signatures.is_empty() {
-            tracing::warn!(
-                "DigiDocBuilder: {} legacy signature(s) added via add_signature() will be written. \
-                 These signatures are deprecated, do not contain valid Reference DigestValues, and will not verify.",
-                self.signatures.len()
-            );
-        }
-
         let path = output_path.as_ref();
 
         // Create parent directory if it doesn't exist
@@ -295,12 +265,6 @@ impl DigiDocBuilder {
 
         // Add signature files
         let mut sig_index = 0usize;
-        for signature in &self.signatures {
-            let signature_xml = self.create_signature_xml(signature, sig_index)?;
-            zip.start_file(format!("META-INF/signatures{}.xml", sig_index), options)?;
-            zip.write_all(signature_xml.as_bytes())?;
-            sig_index += 1;
-        }
         for input in &self.signers {
             let signature_xml = self.build_xades_signature(input, sig_index).await?;
             zip.start_file(format!("META-INF/signatures{}.xml", sig_index), options)?;
@@ -402,38 +366,7 @@ impl DigiDocBuilder {
         ))
     }
 
-    #[allow(deprecated)]
-    fn create_signature_xml(
-        &self,
-        signature: &DigiDocSignature,
-        index: usize,
-    ) -> Result<String, anyhow::Error> {
-        let signature_id = format!("S{}", index);
-        let signed_properties_id = format!("SP{}", index);
 
-        let cert_b64 = base64::Engine::encode(
-            &base64::engine::general_purpose::STANDARD,
-            &signature.certificate,
-        );
-        let sig_value_b64 = base64::Engine::encode(
-            &base64::engine::general_purpose::STANDARD,
-            &signature.signature_value,
-        );
-
-        let xml = format!(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<asic:XAdESSignatures xmlns:asic=\"http://uri.etsi.org/02918/v1.2.1#\" xmlns:ds=\"http://www.w3.org/2000/09/xmldsig#\" xmlns:xades=\"http://uri.etsi.org/01903/v1.3.2#\">\n  <ds:Signature Id=\"{}\">\n    <ds:SignedInfo>\n      <ds:CanonicalizationMethod Algorithm=\"http://www.w3.org/TR/2001/REC-xml-c14n-20010315\"/>\n      <ds:SignatureMethod Algorithm=\"http://www.w3.org/2001/04/xmldsig-more#rsa-sha256\"/>\n      <ds:Reference URI=\"\">\n        <ds:Transforms>\n          <ds:Transform Algorithm=\"http://www.w3.org/2000/09/xmldsig#enveloped-signature\"/>\n        </ds:Transforms>\n        <ds:DigestMethod Algorithm=\"http://www.w3.org/2001/04/xmlenc#sha256\"/>\n        <ds:DigestValue></ds:DigestValue>\n      </ds:Reference>\n      <ds:Reference URI=\"#{}\" Type=\"http://uri.etsi.org/01903#SignedProperties\">\n        <ds:DigestMethod Algorithm=\"http://www.w3.org/2001/04/xmlenc#sha256\"/>\n        <ds:DigestValue></ds:DigestValue>\n      </ds:Reference>\n    </ds:SignedInfo>\n    <ds:SignatureValue Id=\"{}-SIG\">{}</ds:SignatureValue>\n    <ds:KeyInfo>\n      <ds:X509Data>\n        <ds:X509Certificate>{}</ds:X509Certificate>\n      </ds:X509Data>\n    </ds:KeyInfo>\n    <ds:Object>\n      <xades:QualifyingProperties Target=\"#{}\">\n        <xades:SignedProperties Id=\"{}\">\n          <xades:SignedSignatureProperties>\n            <xades:SigningTime>{}</xades:SigningTime>\n            <xades:SigningCertificate>\n              <xades:Cert>\n                <xades:CertDigest>\n                  <ds:DigestMethod Algorithm=\"http://www.w3.org/2001/04/xmlenc#sha256\"/>\n                  <ds:DigestValue></ds:DigestValue>\n                </xades:CertDigest>\n                <xades:IssuerSerial>\n                  <ds:X509IssuerName></ds:X509IssuerName>\n                  <ds:X509SerialNumber></ds:X509SerialNumber>\n                </xades:IssuerSerial>\n              </xades:Cert>\n            </xades:SigningCertificate>\n          </xades:SignedSignatureProperties>\n          <xades:SignedDataObjectProperties>\n            <xades:DataObjectFormat ObjectReference=\"\">\n              <xades:MimeType>application/octet-stream</xades:MimeType>\n            </xades:DataObjectFormat>\n          </xades:SignedDataObjectProperties>\n        </xades:SignedProperties>\n      </xades:QualifyingProperties>\n    </ds:Object>\n  </ds:Signature>\n</asic:XAdESSignatures>",
-            signature_id,
-            signed_properties_id,
-            signature_id,
-            sig_value_b64,
-            cert_b64,
-            signature_id,
-            signed_properties_id,
-            signature.signing_time.to_rfc3339()
-        );
-
-        Ok(xml)
-    }
 }
 
 impl Default for DigiDocBuilder {
@@ -1036,7 +969,6 @@ pub struct Reference {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::TimeZone;
     use tempfile::NamedTempFile;
 
     fn block_on<F: std::future::Future>(fut: F) -> F::Output {
@@ -1047,27 +979,12 @@ mod tests {
             .block_on(fut)
     }
 
-    #[allow(deprecated)]
-    fn sample_signature() -> DigiDocSignature {
-        DigiDocSignature {
-            certificate: vec![0xAAu8; 32],
-            signature_value: vec![0xBBu8; 64],
-            signed_info: "<ds:SignedInfo/>".to_string(),
-            signing_time: chrono::Utc.with_ymd_and_hms(2026, 1, 15, 12, 0, 0).unwrap(),
-        }
-    }
-
-    #[allow(deprecated)]
     fn build_container(
         files: &[(&str, &[u8], &str)],
-        signatures: Vec<DigiDocSignature>,
     ) -> NamedTempFile {
         let mut builder = DigiDocBuilder::new();
         for (name, content, mime) in files {
             builder = builder.add_file_content(name.to_string(), content.to_vec(), mime);
-        }
-        for sig in signatures {
-            builder = builder.add_signature(sig);
         }
         let tmp = NamedTempFile::new().expect("tempfile");
         block_on(builder.create_container(tmp.path())).expect("create_container");
@@ -1076,7 +993,7 @@ mod tests {
 
     #[test]
     fn container_starts_with_uncompressed_mimetype_entry() {
-        let tmp = build_container(&[("request.xml", b"<doc/>", "application/xml")], vec![]);
+        let tmp = build_container(&[("request.xml", b"<doc/>", "application/xml")]);
         let f = std::fs::File::open(tmp.path()).unwrap();
         let mut zip = ZipArchive::new(f).unwrap();
 
@@ -1098,7 +1015,6 @@ mod tests {
         let payload: Vec<u8> = (0u8..=255).collect();
         let tmp = build_container(
             &[("payload.bin", &payload, "application/octet-stream")],
-            vec![],
         );
         let f = std::fs::File::open(tmp.path()).unwrap();
         let mut zip = ZipArchive::new(f).unwrap();
@@ -1115,7 +1031,6 @@ mod tests {
                 ("request.xml", b"<a/>", "application/xml"),
                 ("attachment.pdf", b"%PDF", "application/pdf"),
             ],
-            vec![],
         );
         let f = std::fs::File::open(tmp.path()).unwrap();
         let mut zip = ZipArchive::new(f).unwrap();
@@ -1142,58 +1057,8 @@ mod tests {
     }
 
     #[test]
-    fn container_writes_one_signatures_xml_per_signature() {
-        let sig0 = sample_signature();
-        let mut sig1 = sample_signature();
-        sig1.certificate = vec![0xCCu8; 32];
-        sig1.signature_value = vec![0xDDu8; 64];
-        let tmp = build_container(
-            &[("request.xml", b"<a/>", "application/xml")],
-            vec![sig0.clone(), sig1.clone()],
-        );
-
-        let f = std::fs::File::open(tmp.path()).unwrap();
-        let mut zip = ZipArchive::new(f).unwrap();
-
-        for (idx, sig) in [&sig0, &sig1].iter().enumerate() {
-            let path = format!("META-INF/signatures{}.xml", idx);
-            let mut entry = zip
-                .by_name(&path)
-                .unwrap_or_else(|_| panic!("expected {} in archive", path));
-            let mut s = String::new();
-            entry.read_to_string(&mut s).unwrap();
-
-            assert!(
-                s.contains(&format!("Id=\"S{}\"", idx)),
-                "signatures{}.xml should declare Id=\"S{}\", got: {}",
-                idx,
-                idx,
-                s
-            );
-            let cert_b64 = base64::Engine::encode(
-                &base64::engine::general_purpose::STANDARD,
-                &sig.certificate,
-            );
-            let sig_b64 = base64::Engine::encode(
-                &base64::engine::general_purpose::STANDARD,
-                &sig.signature_value,
-            );
-            assert!(
-                s.contains(&cert_b64),
-                "signatures{}.xml should embed the certificate in base64",
-                idx
-            );
-            assert!(
-                s.contains(&sig_b64),
-                "signatures{}.xml should embed the signature value in base64",
-                idx
-            );
-        }
-    }
-
-    #[test]
     fn container_omits_signatures_directory_when_no_signatures_added() {
-        let tmp = build_container(&[("request.xml", b"<a/>", "application/xml")], vec![]);
+        let tmp = build_container(&[("request.xml", b"<a/>", "application/xml")]);
         let f = std::fs::File::open(tmp.path()).unwrap();
         let mut zip = ZipArchive::new(f).unwrap();
 
