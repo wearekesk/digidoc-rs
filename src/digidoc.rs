@@ -50,6 +50,9 @@ pub struct DigiDocFile {
 /// through `add_signature` were never accepted by any real XAdES
 /// verifier (e.g. Estonian DigiDoc4).
 #[derive(Debug, Clone)]
+#[deprecated(
+    note = "produces signatures that do not verify; use `DigiDocBuilder::add_signer` instead"
+)]
 pub struct DigiDocSignature {
     pub certificate: Vec<u8>,
     pub signature_value: Vec<u8>,
@@ -238,15 +241,28 @@ impl DigiDocBuilder {
         self
     }
 
+    #[deprecated(
+        note = "produces signatures that do not verify; use `DigiDocBuilder::add_signer` instead"
+    )]
+    #[allow(deprecated)]
     pub fn add_signature(mut self, signature: DigiDocSignature) -> Self {
         self.signatures.push(signature);
         self
     }
 
+    #[allow(deprecated)]
     pub async fn create_container<P: AsRef<Path>>(
         &self,
         output_path: P,
     ) -> Result<(), anyhow::Error> {
+        if !self.signatures.is_empty() {
+            tracing::warn!(
+                "DigiDocBuilder: {} legacy signature(s) added via add_signature() will be written. \
+                 These signatures are deprecated, do not contain valid Reference DigestValues, and will not verify.",
+                self.signatures.len()
+            );
+        }
+
         let path = output_path.as_ref();
 
         // Create parent directory if it doesn't exist
@@ -386,6 +402,7 @@ impl DigiDocBuilder {
         ))
     }
 
+    #[allow(deprecated)]
     fn create_signature_xml(
         &self,
         signature: &DigiDocSignature,
@@ -430,6 +447,18 @@ impl<'a> DigiDocReader<'a> {
         Self { document_path }
     }
 
+    /// Parses and validates the DigiDoc/ASiC-E container.
+    ///
+    /// # Errors
+    /// Returns a hard `Err(anyhow::Error)` for fatal preconditions where the archive
+    /// is physically corrupt or unreadable:
+    /// - Failure to open the file (`File::open`)
+    /// - Failure to parse the ZIP structure (`ZipArchive::new`)
+    /// - Missing or unreadable `manifest.xml` file
+    /// - Structural zip entry reading/indexing errors
+    ///
+    /// Non-fatal issues (like missing files, invalid signatures, expired certificates,
+    /// or incorrect mimetypes) are collected into the returned `DigiDocValidationResult`.
     pub fn parse_document(&self) -> Result<DigiDocValidationResult, anyhow::Error> {
         let document_zip_file = File::open(self.document_path)?;
         debug!("Parsing: {}", &self.document_path);
@@ -836,7 +865,7 @@ pub struct QualifyingProperties {
     signed_properties: SignedProperties,
 
     #[serde(rename = "UnsignedProperties")]
-    unsigned_properties: UnsignedProperties,
+    unsigned_properties: Option<UnsignedProperties>,
 
     #[serde(rename = "@Target")]
     target: String,
@@ -926,13 +955,13 @@ pub struct UnsignedProperties {
 #[derive(Serialize, Deserialize)]
 pub struct UnsignedSignatureProperties {
     #[serde(rename = "SignatureTimeStamp")]
-    signature_time_stamp: SignatureTimeStamp,
+    pub signature_time_stamp: Option<SignatureTimeStamp>,
 
     #[serde(rename = "CertificateValues")]
-    certificate_values: CertificateValues,
+    pub certificate_values: Option<CertificateValues>,
 
     #[serde(rename = "RevocationValues")]
-    revocation_values: RevocationValues,
+    pub revocation_values: Option<RevocationValues>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -1018,6 +1047,7 @@ mod tests {
             .block_on(fut)
     }
 
+    #[allow(deprecated)]
     fn sample_signature() -> DigiDocSignature {
         DigiDocSignature {
             certificate: vec![0xAAu8; 32],
@@ -1027,6 +1057,7 @@ mod tests {
         }
     }
 
+    #[allow(deprecated)]
     fn build_container(
         files: &[(&str, &[u8], &str)],
         signatures: Vec<DigiDocSignature>,
@@ -1199,5 +1230,45 @@ mod tests {
         let mut bytes = Vec::new();
         entry.read_to_end(&mut bytes).unwrap();
         assert_eq!(bytes, b"on-disk-payload");
+    }
+
+    #[test]
+    fn sign_verify_roundtrip() {
+        use crate::test_keys::{TEST_CERT, TEST_KEY};
+        use crate::xmldsig::SigningKeyType;
+        use rsa::pkcs8::DecodePrivateKey;
+
+        let private_key = rsa::RsaPrivateKey::from_pkcs8_der(TEST_KEY).unwrap();
+        let signer = SigningKeyType::Rsa(Box::new(private_key));
+
+        let builder = DigiDocBuilder::new()
+            .add_file_content(
+                "test.txt".to_string(),
+                b"hello world".to_vec(),
+                "text/plain",
+            )
+            .add_signer(DigiDocSignerInput {
+                signer: Box::new(signer),
+                certificate_der: TEST_CERT.to_vec(),
+                signing_time: chrono::Utc::now(),
+                production_place: None,
+                claimed_roles: Vec::new(),
+                tsa_url: None,
+                ocsp_url: None,
+                issuer_cert_der: None,
+            });
+
+        let out = NamedTempFile::new().unwrap();
+        block_on(builder.create_container(out.path())).expect("create_container");
+
+        let reader = DigiDocReader::new(out.path().to_str().unwrap());
+        let res = reader.parse_document().expect("parse_document");
+        assert!(
+            res.is_valid,
+            "Validation failed: {:?}",
+            res.validation_errors
+        );
+        assert_eq!(res.signatures.len(), 1);
+        assert!(res.signatures[0].is_valid);
     }
 }

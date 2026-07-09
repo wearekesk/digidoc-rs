@@ -53,6 +53,7 @@ pub async fn fetch_timestamp_token(
     static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
     let client = CLIENT.get_or_init(|| {
         reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(10))
             .build()
             .expect("reqwest::Client::builder().build() infallible with default config")
     });

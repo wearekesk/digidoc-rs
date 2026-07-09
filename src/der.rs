@@ -81,7 +81,11 @@ pub(crate) fn total_tlv_length(input: &[u8]) -> std::result::Result<usize, &'sta
         return Err("empty DER input");
     }
     let (len, len_size) = read_length(&input[1..])?;
-    Ok(1 + len_size + len)
+    let total = 1 + len_size + len;
+    if total > input.len() {
+        return Err("DER value truncated");
+    }
+    Ok(total)
 }
 
 pub(crate) fn read_length(input: &[u8]) -> std::result::Result<(usize, usize), &'static str> {

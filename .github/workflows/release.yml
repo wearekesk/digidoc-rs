@@ -59,8 +59,8 @@ jobs:
       - name: Dry-run publish to crates.io
         run: |
           set -euo pipefail
-          echo "::group::cargo publish -p digidoc --locked --dry-run"
-          cargo publish -p "digidoc" --locked --dry-run
+          echo "::group::cargo publish -p digidoc --dry-run"
+          cargo publish -p "digidoc" --dry-run
           echo "::endgroup::"
 
   # Real publish: uploads the selected crate(s) to crates.io. Only this job holds
@@ -91,6 +91,6 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
         run: |
           set -euo pipefail
-          echo "::group::cargo publish -p digidoc --locked"
-          cargo publish -p "digidoc" --locked
+          echo "::group::cargo publish -p digidoc"
+          cargo publish -p "digidoc"
           echo "::endgroup::"

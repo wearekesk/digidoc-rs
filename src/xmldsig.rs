@@ -388,7 +388,7 @@ impl Signer for SigningKeyType {
             SigningKeyType::Rsa(key) => {
                 use rsa::signature::{SignatureEncoding, hazmat::PrehashSigner};
                 let hashed = Sha256::digest(data);
-                let signer = RsaSigningKey::<Sha256>::new_unprefixed(key.as_ref().clone());
+                let signer = RsaSigningKey::<Sha256>::new(key.as_ref().clone());
                 let signature: RsaSignature = signer
                     .sign_prehash(&hashed)
                     .map_err(|e| SignatureError::SigningError(e.to_string()))?;
@@ -484,14 +484,26 @@ where
             )
             .map_err(|e| SignatureError::CanonicalizationError(e.to_string()))?
         } else if let Some(resolver_fn) = resolver_ref {
-            resolver_fn(uri)?
+            let raw_bytes = resolver_fn(uri)?;
+            // Apply transforms to external references too (e.g.
+            // canonicalization) — previously only same-document
+            // (#id) URIs ran through the transform pipeline.
+            if reference.transforms.is_empty() {
+                raw_bytes
+            } else {
+                xml_sec::xmldsig::transforms::execute_transforms(
+                    signature_node,
+                    xml_sec::xmldsig::types::TransformData::Binary(raw_bytes),
+                    &reference.transforms,
+                )
+                .map_err(|e| SignatureError::CanonicalizationError(e.to_string()))?
+            }
         } else {
             return Err(SignatureError::ReferenceNotFound(format!(
                 "External URI '{}' needs resolver",
                 uri
             )));
         };
-
         let calculated_digest = xml_sec::xmldsig::digest::compute_digest(
             reference.digest_method,
             &referenced_data_bytes,
@@ -515,7 +527,7 @@ where
             ))
         })?;
     xml_sec::c14n::canonicalize(
-        &doc,
+        signed_info_node.document(),
         Some(&|node| signed_info_subtree.contains(&node.id())),
         &c14n_algo,
         &mut canonical_signed_info,
@@ -594,6 +606,8 @@ pub fn build_xades_basic_signature(input: &XadesSignatureInputs<'_>) -> Result<X
     let signed_properties_id = format!("SP{}-SignedProperties", input.index);
     let signature_value_id = format!("{}-SIG", signature_id);
 
+    let digest_uri = input.signer.digest_method_uri();
+
     let mut references: Vec<Reference> = input
         .data_files
         .iter()
@@ -604,7 +618,7 @@ pub fn build_xades_basic_signature(input: &XadesSignatureInputs<'_>) -> Result<X
             uri: file.uri.to_string(),
             transforms: None,
             digest_method: DigestMethod {
-                algorithm: "http://www.w3.org/2001/04/xmlenc#sha256".to_string(),
+                algorithm: digest_uri.to_string(),
             },
             digest_value: general_purpose::STANDARD.encode(Sha256::digest(file.content)),
         })
@@ -647,7 +661,7 @@ pub fn build_xades_basic_signature(input: &XadesSignatureInputs<'_>) -> Result<X
                 cert: XadesCert {
                     cert_digest: XadesCertDigest {
                         digest_method: DigestMethod {
-                            algorithm: "http://www.w3.org/2001/04/xmlenc#sha256".to_string(),
+                            algorithm: digest_uri.to_string(),
                         },
                         digest_value: cert_digest_b64,
                     },
@@ -688,7 +702,7 @@ pub fn build_xades_basic_signature(input: &XadesSignatureInputs<'_>) -> Result<X
         uri: format!("#{}", signed_properties_id),
         transforms: None,
         digest_method: DigestMethod {
-            algorithm: "http://www.w3.org/2001/04/xmlenc#sha256".to_string(),
+            algorithm: digest_uri.to_string(),
         },
         digest_value: signed_properties_digest_b64,
     });

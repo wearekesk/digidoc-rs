@@ -5,6 +5,9 @@ pub mod ocsp;
 pub mod tsa;
 pub mod xmldsig;
 
+#[cfg(test)]
+pub(crate) mod test_keys;
+
 // Re-export major builder and reader types at root level
 pub use crate::digidoc::{
     DigiDocBuilder, DigiDocFile, DigiDocProductionPlace, DigiDocReader, DigiDocSignature,
