@@ -25,9 +25,7 @@ mod builder;
 mod reader;
 
 pub use builder::{DigiDocBuilder, DigiDocProductionPlace, DigiDocSignerInput};
-pub use reader::{
-    DigiDocReader, DigiDocSignatureInfo, DigiDocSignerInfo, DigiDocValidationResult,
-};
+pub use reader::{DigiDocReader, DigiDocSignatureInfo, DigiDocSignerInfo, DigiDocValidationResult};
 
 #[derive(Debug, Clone)]
 pub struct DigiDocFile {
@@ -173,7 +171,11 @@ mod tests {
         let signer = SigningKeyType::Rsa(Box::new(private_key));
 
         let builder = DigiDocBuilder::new()
-            .add_file_content("test.txt".to_string(), b"hello world".to_vec(), "text/plain")
+            .add_file_content(
+                "test.txt".to_string(),
+                b"hello world".to_vec(),
+                "text/plain",
+            )
             .add_signer(DigiDocSignerInput {
                 signer: Box::new(signer),
                 certificate_der: TEST_CERT.to_vec(),
@@ -190,7 +192,11 @@ mod tests {
 
         let reader = DigiDocReader::new(out.path().to_str().unwrap());
         let res = reader.parse_document().expect("parse_document");
-        assert!(res.is_valid, "Validation failed: {:?}", res.validation_errors);
+        assert!(
+            res.is_valid,
+            "Validation failed: {:?}",
+            res.validation_errors
+        );
         assert_eq!(res.signatures.len(), 1);
         assert!(res.signatures[0].is_valid);
     }

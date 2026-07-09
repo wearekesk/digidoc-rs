@@ -10,9 +10,7 @@ use quick_xml::se::to_string;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
-use super::{
-    CanonicalizationMethod, DigestMethod, Reference, SignatureMethod, SignedInfo, Signer,
-};
+use super::{CanonicalizationMethod, DigestMethod, Reference, SignatureMethod, SignedInfo, Signer};
 use crate::error::{Result, SignatureError};
 
 #[derive(Serialize, Debug)]

@@ -265,10 +265,9 @@ impl DigiDocBuilder {
             .issuer_cert_der
             .as_deref()
             .unwrap_or(&input.certificate_der);
-        let ocsp_response =
-            fetch_ocsp_response(ocsp_url, &input.certificate_der, issuer_cert)
-                .await
-                .map_err(|e: SignatureError| anyhow!("OCSP fetch: {}", e))?;
+        let ocsp_response = fetch_ocsp_response(ocsp_url, &input.certificate_der, issuer_cert)
+            .await
+            .map_err(|e: SignatureError| anyhow!("OCSP fetch: {}", e))?;
         upgrade_xades_t_to_lt(&t_xml, &bes.signature_id, issuer_cert, &ocsp_response)
             .map_err(|e: SignatureError| anyhow!("xades-LT upgrade: {}", e))
     }
@@ -291,7 +290,10 @@ impl DigiDocBuilder {
         };
         let body = quick_xml::se::to_string(&manifest)
             .map_err(|e| anyhow!("manifest serialise: {}", e))?;
-        Ok(format!("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n{}", body))
+        Ok(format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n{}",
+            body
+        ))
     }
 }
 
