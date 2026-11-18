@@ -127,7 +127,7 @@ impl<'a> DigiDocReader<'a> {
         let mut signatures = Vec::new();
         for i in 0..zip.len() {
             let mut entry = zip.by_index(i)?;
-            let zip_file_name = entry.name().to_owned();
+            let zip_file_name = entry.name()?.into_owned();
             if !entry.is_file() || !zip_file_name.starts_with("META-INF/signatures") {
                 continue;
             }
@@ -201,7 +201,7 @@ impl<'a> DigiDocReader<'a> {
             "1.2.840.113549.1.1.1" => {
                 use rsa::pkcs1::DecodeRsaPublicKey;
                 let rsa_key =
-                    rsa::RsaPublicKey::from_pkcs1_der(&cert.public_key().subject_public_key.data)?;
+                    rsa::PublicKey::from_pkcs1_der(&cert.public_key().subject_public_key.data)?;
                 PublicKeyType::Rsa(rsa_key)
             }
             "1.2.840.10045.2.1" => {

@@ -6,7 +6,7 @@
 
 use base64::{Engine as _, engine::general_purpose};
 use quick_xml::se::to_string;
-use rsa::RsaPrivateKey;
+use rsa::PrivateKey as RsaPrivateKey;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
@@ -236,5 +236,29 @@ mod tests {
         );
 
         assert!(verify_res.is_ok(), "Verification failed: {:?}", verify_res);
+
+        // The same document with its signed payload changed must be refused.
+        let tampered = signed_xml.replacen(">hello<", ">jello<", 1);
+        assert_ne!(
+            tampered, signed_xml,
+            "the payload text must be present to tamper with"
+        );
+        let tampered_res = verify_signature(
+            tampered.as_bytes(),
+            &PublicKeyType::Rsa(signer_public_key(&signer)),
+            None::<fn(&str) -> Result<Vec<u8>>>,
+        );
+        assert!(
+            tampered_res.is_err(),
+            "a tampered payload verified: {:?}",
+            tampered_res
+        );
+    }
+
+    fn signer_public_key(signer: &SigningKeyType) -> rsa::PublicKey {
+        match signer {
+            SigningKeyType::Rsa(key) => key.to_public_key(),
+            _ => unreachable!("the test signs with RSA"),
+        }
     }
 }
