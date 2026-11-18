@@ -8,7 +8,7 @@
 //! * [`envelope`] — enveloping signatures with the payload in a `ds:Object`.
 
 use rsa::{
-    RsaPrivateKey, RsaPublicKey,
+    PrivateKey as RsaPrivateKey, PublicKey as RsaPublicKey,
     pkcs1v15::{Signature as RsaSignature, SigningKey as RsaSigningKey},
 };
 use serde::{Deserialize, Serialize};
@@ -211,7 +211,7 @@ where
     F: Fn(&str) -> Result<Vec<u8>>,
 {
     let xml_str = std::str::from_utf8(xml_data)?;
-    let doc = roxmltree::Document::parse(xml_str)
+    let doc = xml_sec::Document::parse(xml_str)
         .map_err(|e| SignatureError::XmlStructureError(e.to_string()))?;
 
     let signature_node = doc

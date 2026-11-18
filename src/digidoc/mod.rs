@@ -65,7 +65,7 @@ mod tests {
         let f = std::fs::File::open(tmp.path()).unwrap();
         let mut zip = ZipArchive::new(f).unwrap();
 
-        let first_name = zip.by_index(0).unwrap().name().to_owned();
+        let first_name = zip.by_index(0).unwrap().name().unwrap().into_owned();
         assert_eq!(first_name, "mimetype");
         let mut entry = zip.by_index(0).unwrap();
         assert_eq!(
@@ -129,10 +129,11 @@ mod tests {
         let n = zip.len();
         for i in 0..n {
             let entry = zip.by_index(i).unwrap();
+            let name = entry.name().unwrap();
             assert!(
-                !entry.name().starts_with("META-INF/signatures"),
+                !name.starts_with("META-INF/signatures"),
                 "no signatures*.xml entry should appear without signatures, got: {}",
-                entry.name()
+                name
             );
         }
     }
@@ -167,7 +168,7 @@ mod tests {
         use crate::xmldsig::SigningKeyType;
         use rsa::pkcs8::DecodePrivateKey;
 
-        let private_key = rsa::RsaPrivateKey::from_pkcs8_der(TEST_KEY).unwrap();
+        let private_key = rsa::PrivateKey::from_pkcs8_der(TEST_KEY).unwrap();
         let signer = SigningKeyType::Rsa(Box::new(private_key));
 
         let builder = DigiDocBuilder::new()
